@@ -1,11 +1,35 @@
 'use strict'
 
+async = require 'async'
 {EventEmitter} = require 'events'
 Asset = require './asset'
 SourceFile = require './source_file'
 helpers = require '../helpers'
 logger = require '../logger'
 sysPath = require 'path'
+
+call = (fn, arg) ->
+  fn arg
+
+initQueue = (onDrain) ->
+  ioWaitQueue = []
+
+  cpuQueue = async.queue call, 1
+  cpuQueue.drain = onDrain
+
+  ioQueue = async.queue call, 128
+  ioQueue.drain = =>
+    ioWaitQueue.forEach (task) =>
+      process.nextTick =>
+        cpuQueue.push task
+    ioWaitQueue = []
+
+  queue = async.queue (task, callback) =>
+    ioQueue.push task.io
+    ioWaitQueue.push task.cpu if task.cpu?
+    callback()
+  , 1
+  queue
 
 # A list of `fs_utils.SourceFile` or `fs_utils.Asset`
 # with some additional methods used to simplify file reading / removing.
@@ -17,6 +41,7 @@ module.exports = class FileList extends EventEmitter
   constructor: (@config) ->
     @files = []
     @assets = []
+    @queue = initQueue @_resetTimer
     @on 'change', @_change
     @on 'unlink', @_unlink
 
@@ -56,23 +81,24 @@ module.exports = class FileList extends EventEmitter
       .filter (dependent) =>
         path in dependent.cache.dependencies
       .forEach(@_compile)
-    @_resetTimer()
 
   _compile: (file) =>
-    file.compile (error) =>
-      logger.debug 'info', "Compiled file '#{file.path}'"
-      if error?
-        return logger.error "#{file.compilerName} failed in '#{file.path}' -- 
-#{error}"
-      @_compileDependentFiles file.path
-      @_resetTimer()
+    @queue.push io: file.read, cpu: (callback) =>
+      file.compile (error) =>
+        logger.debug 'info', "Compiled file '#{file.path}'"
+        if error?
+          return logger.error "#{file.compilerName} failed in '#{file.path}' -- 
+  #{error}"
+        @_compileDependentFiles file.path
+        callback()
 
   _copy: (asset) =>
-    asset.copy (error) =>
-      logger.debug 'info', "Copied asset '#{asset.path}'"
-      if error?
-        return logger.error "Copying of '#{asset.path}' failed -- #{error}"
-      @_resetTimer()
+    @queue.push io: (callback) =>
+      asset.copy (error) =>
+        logger.debug 'info', "Copied asset '#{asset.path}'"
+        if error?
+          return logger.error "Copying of '#{asset.path}' failed -- #{error}"
+        callback()
 
   _add: (path, compiler, isHelper) ->
     isVendor = helpers.startsWith(path, @config.paths.vendor)

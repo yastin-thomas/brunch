@@ -16,7 +16,9 @@ module.exports = class SourceFile
       fileName = "brunch_#{@compilerName}_#{sysPath.basename @path}"
       @realPath = @path
       @path = sysPath.join 'vendor', 'scripts', fileName
-    @cache = Object.seal({data: '', dependencies: [], compilationTime: null})
+    @cache = Object.seal({
+      rawData: '', data: '', dependencies: [], compilationTime: null
+    })
     Object.freeze(this)
 
   _getDependencies: (data, path, callback) ->
@@ -51,18 +53,22 @@ module.exports = class SourceFile
       else
         data
 
-  # Reads file and compiles it with compiler. Data is cached to `this.data`
-  # in order to do compilation only if the file was changed.
-  compile: (callback) ->
+  read: (callback) =>
     realPath = if @isHelper then @realPath else @path
     fs.readFile realPath, (error, buffer) =>
       return callback "Read error: #{error}" if error?
-      fileContent = buffer.toString()
-      @compiler.compile fileContent, @path, (error, result) =>
-        return callback "Compile error: #{error}" if error?
-        @_getDependencies fileContent, @path, (error, dependencies) =>
-          return callback "GetDeps error: #{error}" if error?
-          @cache.dependencies = dependencies
-          @cache.data = @_wrap result if result?
-          @cache.compilationTime = Date.now()
-          callback null, @cache.data
+      @cache.rawData = buffer.toString()
+      callback()
+
+  # Reads file and compiles it with compiler. Data is cached to `this.data`
+  # in order to do compilation only if the file was changed.
+  compile: (callback) =>
+    rawData = @cache.rawData
+    @compiler.compile rawData, @path, (error, result) =>
+      return callback "Compile error: #{error}" if error?
+      @_getDependencies rawData, @path, (error, dependencies) =>
+        return callback "GetDeps error: #{error}" if error?
+        @cache.dependencies = dependencies
+        @cache.data = @_wrap result if result?
+        @cache.compilationTime = Date.now()
+        callback null, @cache.data
