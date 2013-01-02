@@ -111,6 +111,19 @@ sortByBefore = (config, a, b) ->
   else
     sortByAfter config, a, b
 
+sortByImportance = (config, a, b) ->
+  important = '!brunch'
+  aIsImportant = a.indexOf(important) isnt -1
+  bIsImportant = b.indexOf(important) isnt -1
+  if aIsImportant and not bIsImportant
+    -1
+  else if not aIsImportant and bIsImportant
+    1
+  else if aIsImportant and bIsImportant
+    sortAlphabetically a, b
+  else
+    sortByBefore config, a, b
+
 # Sorts by pattern.
 #
 # Examples
@@ -126,7 +139,7 @@ exports.sortByConfig = (files, config) ->
       before: config.before ? []
       after: config.after ? []
       vendorConvention: (config.vendorConvention ? -> no)
-    files.slice().sort (a, b) -> sortByBefore cfg, a, b
+    files.slice().sort (a, b) -> sortByImportance cfg, a, b
   else
     files
 
@@ -257,8 +270,8 @@ exports.cleanModuleName = cleanModuleName = (path) ->
     .replace(new RegExp('\\\\', 'g'), '/')
     .replace(/^app\//, '')
 
-commonJsWrapper = (fullPath, fileData, isVendor) ->
-  sourceURLPath = cleanModuleName fullPath
+commonJsWrapper = (component) -> (fullPath, fileData, isVendor) ->
+  sourceURLPath = "#{component.name}/#{cleanModuleName fullPath}"
   path = JSON.stringify sourceURLPath.replace /\.\w+$/, '.js'
   sourceURL = no
 
@@ -282,9 +295,9 @@ commonJsWrapper = (fullPath, fileData, isVendor) ->
       "function(exports, require, module) {\n  #{indent data}\n}"
     "require.register(#{path}, #{definition});\n"
 
-normalizeWrapper = (typeOrFunction) ->
+normalizeWrapper = (typeOrFunction, component) ->
   switch typeOrFunction
-    when 'commonjs' then commonJsWrapper
+    when 'commonjs' then commonJsWrapper component
     when false then (path, data) -> "#{data}"
     else
       if typeof typeOrFunction is 'function'
@@ -344,6 +357,9 @@ exports.setConfigDefaults = setConfigDefaults = (config, configPath) ->
   config.server.base  ?= ''
   config.server.port  ?= 3333
   config.server.run   ?= no
+
+  config.component = require sysPath.resolve sysPath.join config.paths.root, 'component.json'
+
   config
 
 getConfigDeprecations = (config) ->
@@ -370,7 +386,7 @@ normalizeConfig = (config) ->
   normalized.join = createJoinConfig config.files
   mod = config.modules
   normalized.modules = {}
-  normalized.modules.wrapper = normalizeWrapper mod.wrapper
+  normalized.modules.wrapper = normalizeWrapper mod.wrapper, config.component
   normalized.modules.definition = normalizeDefinition mod.definition
   normalized.conventions = {}
   Object.keys(config.conventions).forEach (name) ->

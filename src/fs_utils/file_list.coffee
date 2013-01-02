@@ -95,10 +95,10 @@ module.exports = class FileList extends EventEmitter
       return if error?
       debug "Copied asset '#{asset.path}'"
 
-  _add: (path, compiler, linters, isHelper) ->
+  _add: (path, compiler, linters, isHelper, components) ->
     isVendor = @_isVendor path
     wrapper = @config._normalized.modules.wrapper
-    file = new SourceFile path, compiler, linters, wrapper, isHelper, isVendor
+    file = new SourceFile path, compiler, linters, wrapper, isHelper, isVendor, components
     @files.push file
     file
 
@@ -107,7 +107,7 @@ module.exports = class FileList extends EventEmitter
     @assets.push file
     file
 
-  _change: (path, compiler, linters, isHelper) =>
+  _change: (path, compiler, linters, isHelper, components) =>
     ignored = @_ignored path
     if @_isAsset path
       unless ignored
@@ -116,7 +116,8 @@ module.exports = class FileList extends EventEmitter
       if ignored or not compiler
         @_compileDependentFiles path
       else
-        @_compile (@_findByPath(path) ? @_add path, compiler, linters, isHelper)
+        @_compile (@_findByPath(path) ? @_add path, compiler, linters, isHelper, components)
+
   _unlink: (path) =>
     ignored = @_ignored path
     if @_isAsset path

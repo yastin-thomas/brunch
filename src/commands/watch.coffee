@@ -7,6 +7,7 @@ sysPath = require 'path'
 helpers = require '../helpers'
 logger = require '../logger'
 fs_utils = require '../fs_utils'
+Builder = require 'component-builder'
 
 # Get paths to files that plugins include. E.g. handlebars-brunch includes
 # `../vendor/handlebars-runtime.js` with path relative to plugin.
@@ -82,10 +83,10 @@ isPluginFor = (path) -> (plugin) ->
     /$.^/
   pattern.test(path)
 
-changeFileList = (compilers, linters, fileList, path, isHelper) ->
+changeFileList = (compilers, linters, fileList, path, isHelper, components) ->
   compiler = compilers.filter(isPluginFor path)[0]
   currentLinters = linters.filter(isPluginFor path)
-  fileList.emit 'change', path, compiler, currentLinters, isHelper
+  fileList.emit 'change', path, compiler, currentLinters, isHelper, components
 
 # Consolidate all needed info and generate files.
 #
@@ -165,12 +166,21 @@ initialize = (options, configParams, onCompile, callback) ->
     getPluginIncludes(plugins).forEach (path) ->
       changeFileList compilers, linters, fileList, path, yes
 
+    # Component builder.
+    component = require sysPath.resolve sysPath.join config.paths.root, 'component.json'
+    componentBuilder = new Builder config.paths.root
+    componentBuilder.addLookup component.paths if component.paths
+    unless config.optimize
+      componentBuilder.development()
+      componentBuilder.addSourceURLs()
+
     initWatcher config, (error, watcher) ->
       return callback error if error?
       compile = getCompileFn config, joinConfig, fileList, minifiers, watcher, callCompileCallbacks
       reload = getReloadFn config, options, onCompile, watcher, server
       callback error, {
-        config, watcher, server, fileList, compilers, linters, compile, reload
+        config, watcher, server, fileList, compilers, linters, compile, reload,
+        componentBuilder
       }
 
 # Binds needed events to watcher.
@@ -217,14 +227,22 @@ Exiting."
 # start time. It is `null` when there are no compilations.
 class BrunchWatcher
   constructor: (persistent, options, onCompile) ->
+    debug 'Initialized BrunchWatcher'
     configParams = generateParams persistent, options
     initialize options, configParams, onCompile, (error, result) =>
       return logger.error error if error?
-      {config, watcher, fileList, compilers, linters, compile, reload} = result
+      {config, watcher, fileList, compilers, linters, compile, reload, componentBuilder} = result
       logger.notifications = config.notifications
       bindWatcherEvents config, fileList, compilers, linters, watcher, reload, @_startCompilation
       fileList.on 'ready', => compile @_endCompilation()
       @config = config
+      componentBuilder.build (error, buildResult) ->
+        return logger.error error if error?
+        js = buildResult.js
+        css = buildResult.css.trim()
+        # name = component.name
+        changeFileList compilers, linters, fileList, 'app/!brunch/components.js', no, js
+        changeFileList compilers, linters, fileList, 'app/!brunch/components.css', no, css
 
   _startCompilation: =>
     @_start ?= Date.now()
